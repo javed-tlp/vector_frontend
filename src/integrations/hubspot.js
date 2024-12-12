@@ -4,12 +4,12 @@ import axios from 'axios';
 
 export const HubSpotIntegration = ({ user, org, integrationParams, setIntegrationParams }) => {
     const [isConnected, setIsConnected] = useState(false);
-    const [isConnecting, setIsConnecting] = useState(false);
+    const [isLoading, setIsLoading] = useState(false);
+    const [items, setItems] = useState([]); 
 
-    // Function to open OAuth in a new window
     const handleConnectClick = async () => {
         try {
-            setIsConnecting(true);
+            setIsLoading(true);
             const formData = new FormData();
             formData.append('user_id', user);
             formData.append('org_id', org);
@@ -18,37 +18,66 @@ export const HubSpotIntegration = ({ user, org, integrationParams, setIntegratio
 
             const newWindow = window.open(authURL, 'HubSpot Authorization', 'width=600, height=600');
 
-            // Polling for the window to close
             const pollTimer = window.setInterval(() => {
-                if (newWindow?.closed !== false) { 
+                if (newWindow?.closed !== false) {
                     window.clearInterval(pollTimer);
                     handleWindowClosed();
                 }
             }, 200);
         } catch (e) {
-            setIsConnecting(false);
-            alert(e?.response?.data?.detail || 'An error occurred.');
+            setIsLoading(false);
+            alert('An error occurred during authorization.');
         }
     };
 
-    // Function to handle logic when the OAuth window closes
     const handleWindowClosed = async () => {
         try {
+            console.log("OAuth window closed. Starting credential retrieval...");
+    
             const formData = new FormData();
             formData.append('user_id', user);
             formData.append('org_id', org);
+    
+            console.log("Sending request to retrieve credentials...");
             const response = await axios.post(`http://localhost:8000/integrations/hubspot/credentials`, formData);
+    
+            console.log("Received response from credentials endpoint:", response.data);
             const credentials = response.data;
-
+    
             if (credentials) {
-                setIsConnecting(false);
+                console.log("Credentials retrieved successfully:", credentials);
                 setIsConnected(true);
                 setIntegrationParams(prev => ({ ...prev, credentials: credentials, type: 'HubSpot' }));
+                console.log("Fetching HubSpot items...");
+                await loadHubSpotItems(credentials);
+            } else {
+                console.warn("No credentials found in the response.");
             }
-            setIsConnecting(false);
+    
+            setIsLoading(false);
         } catch (e) {
-            setIsConnecting(false);
-            alert(e?.response?.data?.detail || 'An error occurred while retrieving credentials.');
+            setIsLoading(false);
+            if (e.response) {
+                console.error("Error response:", e.response.status, e.response.data);
+            } else if (e.request) {
+                console.error("Error request:", e.request);
+            } else {
+                console.error("Error message:", e.message);
+            }
+            alert('An error occurred while retrieving credentials.');
+        }
+    };
+    
+
+
+    const loadHubSpotItems = async (credentials) => {
+        try {
+            const response = await axios.post(`http://localhost:8000/integrations/hubspot/get_hubspot_items`, {
+                credentials: credentials
+            });
+            setItems(response.data); 
+        } catch (e) {
+            alert('Error loading HubSpot items.');
         }
     };
 
@@ -58,21 +87,25 @@ export const HubSpotIntegration = ({ user, org, integrationParams, setIntegratio
 
     return (
         <Box sx={{ mt: 2 }}>
-            <Box display="flex" alignItems="center" justifyContent="center" sx={{ mt: 2 }}>
-                <Button 
-                    variant="contained" 
-                    onClick={isConnected ? () => {} : handleConnectClick}  
-                    color={isConnected ? 'success' : 'primary'}
-                    disabled={isConnecting}  
-                    style={{
-                        pointerEvents: isConnected ? 'none' : 'auto',
-                        cursor: isConnected ? 'default' : 'pointer',
-                        opacity: isConnected ? 1 : undefined,
-                    }}
-                >
-                    {isConnected ? 'HubSpot Connected' : isConnecting ? <CircularProgress size={20} /> : 'Connect to HubSpot'}
-                </Button>
-            </Box>
+          
+            <Button
+                onClick={isConnected ? () => {} : handleConnectClick} 
+                disabled={isLoading}
+            >
+                {isConnected ? 'HubSpot Connected' : isLoading ? <CircularProgress size={20} /> : 'Connect to HubSpot'}
+            </Button>
+
+            
+            {items.length > 0 && (
+                <Box sx={{ mt: 2 }}>
+                    <h3>HubSpot Items:</h3>
+                    <ul>
+                        {items.map((item) => (
+                            <li key={item.id}>{item.name}</li>  
+                        ))}
+                    </ul>
+                </Box>
+            )}
         </Box>
     );
 };
